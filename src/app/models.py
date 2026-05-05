@@ -4,11 +4,9 @@ from datetime import datetime
 
 
 class CardioTraceRecord(BaseModel):
-    tenant_id: str
-    session_id: str
-    device_id: str
+    measurement_session_id: str
     timestamp: datetime
-    hr: float
+    heart_rate: float
     hrv: float
 
 

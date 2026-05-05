@@ -5,12 +5,16 @@ from dataclasses import dataclass
 from typing import Any
 
 import httpx
+import logging
+from app.models import CardioTraceRecord
 
 from app.exceptions import (
     BackendApiError,
     BackendApiValidationError,
     DeviceIdentityNotFoundError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -55,7 +59,30 @@ class BackendApiClient:
 
         return EnrichedDeviceContext(device_uid=device_uid, session_uid=session_uid)
 
-    async def store(self, *args: Any, **kwargs: Any) -> None: ...
+    async def store(self, tenant_id: str, record: CardioTraceRecord) -> None:
+        headers = {"X-Tenant-Id": tenant_id}
+        response = await self._client.post(
+            "/measurements", json=record.model_dump(mode="json"), headers=headers
+        )
+
+        if response.status_code == 201:
+            self._parse_json(response)
+            return
+        if response.status_code == 202:
+            logger.info(
+                "Measurement dropped by backend: measurement_session_id=%s",
+                record.measurement_session_id,
+            )
+            return
+        if response.status_code == 400:
+            raise BackendApiValidationError("Invalid measurements payload")
+        if response.status_code == 404:
+            raise BackendApiError("Measurement session not found")
+        if response.status_code >= 500:
+            raise BackendApiError(f"Backend API server error: {response.status_code}")
+        raise BackendApiError(
+            f"Unexpected measurements response status: {response.status_code}"
+        )
 
     async def is_ready(self) -> bool:
         try:
