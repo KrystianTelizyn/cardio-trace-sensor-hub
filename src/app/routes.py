@@ -7,7 +7,7 @@ from app.schemas import HealthResponse, ReadinessResponse
 router = APIRouter()
 
 
-@router.get("/healthz", response_model=HealthResponse, tags=["Health"])
+@router.get("/livez", response_model=HealthResponse, tags=["Health"])
 async def healthz() -> HealthResponse:
     return HealthResponse(status="ok")
 
@@ -16,7 +16,7 @@ async def healthz() -> HealthResponse:
 async def readyz(
     sensor_hub: SensorHub = Depends(get_sensor_hub),
 ) -> ReadinessResponse:
-    checks = sensor_hub.is_ready()
+    checks = await sensor_hub.is_ready()
     return ReadinessResponse(
         status="ok" if all(checks.values()) else "error", checks=checks
     )

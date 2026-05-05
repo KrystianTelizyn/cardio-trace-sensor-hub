@@ -1,62 +1,66 @@
 services:
   redis:
-    image: redis:7-alpine
+    image: redis:8.4
     ports:
       - "6379:6379"
-
+  redisinsight:
+    image: redis/redisinsight:latest
+    ports:
+      - "5540:5540"
+    depends_on:
+      - redis
   broker:
     image: eclipse-mosquitto:latest
     ports:
       - "1883:1883"
 
-  db:
-    image: postgres:17
-    restart: unless-stopped
-    env_file:
-      - .env
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-cardio_trace}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+  # db:
+  #   image: postgres:17
+  #   restart: unless-stopped
+  #   env_file:
+  #     - .env
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-cardio_trace}"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 10
 
-  cardio-trace-backend-api:
-    image: cardio-trace-backend-api:dev
-    env_file:
-      - .env
-    depends_on:
-      db:
-        condition: service_healthy
-    ports:
-      - "8000:8000"
+  #  api:
+  #   image: cardio-trace-backend-api:dev
+  #   env_file:
+  #     - .env
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   ports:
+  #     - "8000:8000"
 
-  simulation:
+  iot-simulation:
     image: cardio-trace-iot-sim:dev
     env_file:
       - .env
     depends_on:
       - broker
+    volumes:
+      - ./data:/app/data
     ports:
       - "8001:8000"
 
   sensor-hub:
-    build:
-      context: .
-      dockerfile: Dockerfile
     image: cardio-trace-sensor-hub:dev
     env_file:
       - .env
     depends_on:
       - broker
       - redis
-      - cardio-trace-backend-api
+      # - cardio-trace-backend-api
     ports:
       - "8002:8000"
 
-volumes:
-  postgres_data:
-    name: cardio-trace-sensor-hub-pgdata
+# volumes:
+  # postgres_data:
+  #   name: cardio-trace-sensor-hub-pgdata

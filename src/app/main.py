@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-
+import logging
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from starlette.types import Lifespan
@@ -10,15 +10,16 @@ from app.exceptions import HubNotReadyError
 from app.routes import router
 from app.sensor_hub import SensorHub
 
+logging.basicConfig(level=logging.INFO)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     load_dotenv()
     settings = AppSettings.from_env()
-    sensor_hub = SensorHub(settings)
-    app.state.sensor_hub = sensor_hub
-    yield
-    await sensor_hub.shutdown()
+    async with SensorHub(settings) as sensor_hub:
+        app.state.sensor_hub = sensor_hub
+        yield
 
 
 def create_app(*, lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:

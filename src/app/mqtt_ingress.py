@@ -22,40 +22,40 @@ class MqttIngress:
         mqtt_subscribe_pattern: str,
         logic: IngressLogic,
     ) -> None:
-        self._mqtt_host = mqtt_host
-        self._mqtt_port = mqtt_port
-        self._mqtt_subscribe_pattern = mqtt_subscribe_pattern
-        self._task: asyncio.Task[None] | None = None
+        self.host = mqtt_host
+        self.port = mqtt_port
+        self.subscribe_pattern = mqtt_subscribe_pattern
+        self.task: asyncio.Task[None] | None = None
         self.connected = False
-        self._logic = logic
+        self.ingress_logic = logic
 
     async def start(self) -> None:
-        if self._task is not None:
+        if self.task is not None:
             return
-        self._task = asyncio.create_task(self._consume_loop(), name="mqtt-ingress")
+        self.task = asyncio.create_task(self.consume_loop(), name="mqtt-ingress")
 
     async def stop(self) -> None:
-        if self._task is None or self._task.done():
-            self._task = None
+        if self.task is None or self.task.done():
+            self.task = None
             return
-        self._task.cancel()
+        self.task.cancel()
         try:
-            await self._task
+            await self.task
         except asyncio.CancelledError:
             pass
-        self._task = None
+        self.task = None
         self.connected = False
 
-    async def _consume_loop(self) -> None:
+    async def consume_loop(self) -> None:
         try:
             async with Client(
-                hostname=self._mqtt_host,
-                port=self._mqtt_port,
+                hostname=self.host,
+                port=self.port,
             ) as client:
-                await client.subscribe(self._mqtt_subscribe_pattern)
+                await client.subscribe(self.subscribe_pattern)
                 self.connected = True
-                async for _message in client.messages:
-                    await self._logic.on_message(_message.topic, _message.payload)
+                async for message in client.messages:
+                    await self.ingress_logic.on_message(message.topic, message.payload)
         except asyncio.CancelledError:
             raise
         except Exception:
