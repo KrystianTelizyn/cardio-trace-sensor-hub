@@ -35,6 +35,7 @@ class AppSettings:
     mqtt_host: str
     mqtt_port: int
     mqtt_subscribe_pattern: str
+    tenant_extraction_regex: str
     redis_url: str
     backend_api_base_url: str
 
@@ -50,6 +51,8 @@ class AppSettings:
             mqtt_port=int(mqtt_port_s),
             mqtt_subscribe_pattern=env("MQTT_SUBSCRIBE_PATTERN", required=False)
             or "example/#",
+            tenant_extraction_regex=env("TENANT_EXTRACTION_REGEX", required=False)
+            or r"^cardio-trace/([^/]+)/[^/]+$",
             redis_url=env("REDIS_URL"),
             backend_api_base_url=env("BACKEND_API_BASE_URL"),
         )

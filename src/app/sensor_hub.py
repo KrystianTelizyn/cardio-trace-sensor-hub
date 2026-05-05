@@ -3,9 +3,13 @@ from app.mqtt_ingress import MqttIngress
 from redis.asyncio import Redis
 from app.backend_api_client import BackendApiClient
 import logging
-from app.models import CardioTraceContext
+from app.models import CardioTraceContext, CardioTraceRecord
 from app.parsers import ParsersChain
-from app.exceptions import SensorHubException, TenantIdentificationError
+from app.exceptions import (
+    PipelineStageError,
+    SensorHubException,
+    TenantIdentificationError,
+)
 import re
 
 logger = logging.getLogger(__name__)
@@ -65,8 +69,28 @@ class SensorHub:
         self.parsers_chain.parse(context)
 
     async def backend_identification(self, context: CardioTraceContext) -> None:
-        if context.serial_number is None or context.brand is None:
-            raise SensorHubException("Missing serial number or brand for enrichment")
+        if (
+            context.tenant_id is None
+            or context.serial_number is None
+            or context.brand is None
+        ):
+            raise PipelineStageError(
+                stage="backend_identification",
+                message="Missing tenant_id, serial number, or brand for enrichment",
+            )
+
+        device_map_key = (
+            f"device_map:{context.tenant_id}:{context.brand}:{context.serial_number}"
+        )
+        device_uid = await self.redis_client.get(device_map_key)
+        if device_uid is not None:
+            device_session_key = f"device_session:{context.tenant_id}:{device_uid}"
+            session_uid = await self.redis_client.get(device_session_key)
+            if session_uid is not None:
+                context.device_id = device_uid
+                context.session_id = session_uid
+                return
+
         enriched = await self.backend_api_client.enrich(
             serial_number=context.serial_number, brand=context.brand
         )
@@ -74,4 +98,22 @@ class SensorHub:
         context.session_id = enriched.session_uid
 
     async def save_record(self, context: CardioTraceContext) -> None:
-        await self.backend_api_client.store(context)
+        if (
+            context.tenant_id is None
+            or context.session_id is None
+            or context.timestamp is None
+            or context.hr is None
+            or context.hrv is None
+        ):
+            raise PipelineStageError(
+                stage="save_record",
+                message="Missing one or more required measurement fields",
+            )
+
+        record = CardioTraceRecord(
+            measurement_session_id=context.session_id,
+            timestamp=context.timestamp,
+            heart_rate=context.hr,
+            hrv=context.hrv,
+        )
+        await self.backend_api_client.store(context.tenant_id, record)

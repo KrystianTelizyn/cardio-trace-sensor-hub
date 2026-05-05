@@ -4,6 +4,12 @@ class SensorHubException(Exception):
         super().__init__(message)
 
 
+class PipelineStageError(SensorHubException):
+    def __init__(self, *, stage: str, message: str):
+        self.stage = stage
+        super().__init__(f"[{stage}] {message}")
+
+
 class ConfigError(SensorHubException):
     pass
 

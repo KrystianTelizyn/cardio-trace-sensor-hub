@@ -55,6 +55,7 @@ source = { editable = "." }
 dependencies = [
     { name = "aiomqtt" },
     { name = "fastapi", extra = ["standard"] },
+    { name = "httpx" },
     { name = "python-dotenv" },
     { name = "redis" },
 ]
@@ -70,6 +71,7 @@ dev = [
 requires-dist = [
     { name = "aiomqtt", specifier = ">=2.5.1" },
     { name = "fastapi", extras = ["standard"], specifier = ">=0.135.2" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "redis", specifier = ">=5.0.0" },
 ]

@@ -3,7 +3,7 @@
         {
             "device_id": "apple-watch",
             "payload_format": "PayloadTemplates.Apple",
-            "topic": "example/apple/watch",
+            "topic": "cardio-trace/org_nBep3mlTxl2DlaNs/apple-watch",
             "hr_frame": 5,
             "hrv_frame": 30,
             "record_tag": "physionet-rr-011"
@@ -11,7 +11,7 @@
         {
             "device_id": "garmin-watch",
             "payload_format": "PayloadTemplates.Garmin",
-            "topic": "example/garmin/watch",
+            "topic": "cardio-trace/org_nBep3mlTxl2DlaNs/garmin-watch",
             "hr_frame": 5,
             "hrv_frame": 30,
             "record_tag": "physionet-rr-010"

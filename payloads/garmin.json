@@ -1,0 +1,22 @@
+{
+    "header": {
+      "device_id": "1234567890",
+      "message_type": "HEART_RATE_HRV_EPOCH",
+      "collected_at": "2026-05-05T08:25:24.162404",
+      "frame_id": 5
+    },
+    "data": {
+      "heart_rate_bpm": 80,
+      "sdnn_ms": 13.5,
+      "rmssd_ms": 35.5,
+      "unit": {
+        "heart_rate": "bpm",
+        "sdnn": "ms",
+        "rmssd": "ms"
+      }
+    },
+    "status": {
+      "signal_quality": 0.98,
+      "battery_level_pct": 76
+    }
+  }
