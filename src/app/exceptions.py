@@ -38,3 +38,7 @@ class BackendApiValidationError(BackendApiError):
 
 class DeviceIdentityNotFoundError(SensorHubException):
     pass
+
+
+class SessionIdentityNotFoundError(SensorHubException):
+    pass

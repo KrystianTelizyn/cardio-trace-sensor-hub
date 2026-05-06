@@ -7,9 +7,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.backend_api_client import EnrichedDeviceContext
-from app.exceptions import PipelineStageError, TenantIdentificationError
+from app.exceptions import (
+    DeviceIdentityNotFoundError,
+    PipelineStageError,
+    SessionIdentityNotFoundError,
+    TenantIdentificationError,
+)
 from app.models import CardioTraceContext, CardioTraceRecord
-from app.sensor_hub import SensorHub
+from app.sensor_hub import (
+    DEVICE_NOT_FOUND_SENTINEL,
+    SESSION_NOT_FOUND_SENTINEL,
+    SensorHub,
+)
 
 from tests.helpers import fake_settings, make_context
 
@@ -82,6 +91,120 @@ class TestBackendIdentification:
             brand="garmin",
         )
         sensor_hub.redis_client.get = AsyncMock(return_value=None)
+
+        await sensor_hub.backend_identification(ctx)
+
+        assert ctx.device_id == "dev-uid-1"
+        assert ctx.session_id == "sess-uid-1"
+        sensor_hub.backend_api_client.enrich.assert_called_once_with(
+            serial_number="sn1", brand="garmin", tenant_id="t1"
+        )
+
+    async def test_device_sentinel_raises(self, sensor_hub: SensorHub) -> None:
+        ctx = CardioTraceContext(
+            raw=b"{}",
+            topic="cardio-trace/t1/d1",
+            tenant_id="t1",
+            serial_number="sn1",
+            brand="apple",
+        )
+        sensor_hub.redis_client.get = AsyncMock(return_value=DEVICE_NOT_FOUND_SENTINEL)
+
+        with pytest.raises(DeviceIdentityNotFoundError):
+            await sensor_hub.backend_identification(ctx)
+
+        sensor_hub.backend_api_client.enrich.assert_not_called()
+
+    async def test_session_sentinel_raises(self, sensor_hub: SensorHub) -> None:
+        ctx = CardioTraceContext(
+            raw=b"{}",
+            topic="cardio-trace/t1/d1",
+            tenant_id="t1",
+            serial_number="sn1",
+            brand="apple",
+        )
+        sensor_hub.redis_client.get = AsyncMock(
+            side_effect=["dev-from-redis", SESSION_NOT_FOUND_SENTINEL]
+        )
+
+        with pytest.raises(SessionIdentityNotFoundError):
+            await sensor_hub.backend_identification(ctx)
+
+        sensor_hub.backend_api_client.enrich.assert_not_called()
+
+    async def test_device_cached_session_miss_calls_enrich(
+        self, sensor_hub: SensorHub
+    ) -> None:
+        ctx = CardioTraceContext(
+            raw=b"{}",
+            topic="cardio-trace/t1/d1",
+            tenant_id="t1",
+            serial_number="sn1",
+            brand="garmin",
+        )
+        sensor_hub.redis_client.get = AsyncMock(side_effect=["dev-from-redis", None])
+
+        await sensor_hub.backend_identification(ctx)
+
+        assert ctx.device_id == "dev-uid-1"
+        assert ctx.session_id == "sess-uid-1"
+        sensor_hub.backend_api_client.enrich.assert_called_once_with(
+            serial_number="sn1", brand="garmin", tenant_id="t1"
+        )
+
+    async def test_enrich_returns_null_device_raises(
+        self, sensor_hub: SensorHub
+    ) -> None:
+        ctx = CardioTraceContext(
+            raw=b"{}",
+            topic="cardio-trace/t1/d1",
+            tenant_id="t1",
+            serial_number="sn1",
+            brand="garmin",
+        )
+        sensor_hub.redis_client.get = AsyncMock(return_value=None)
+        sensor_hub.backend_api_client.enrich = AsyncMock(
+            return_value=EnrichedDeviceContext(
+                device_uid=None, session_uid="sess-uid-1"
+            )
+        )
+
+        with pytest.raises(DeviceIdentityNotFoundError):
+            await sensor_hub.backend_identification(ctx)
+
+    async def test_enrich_returns_null_session_raises(
+        self, sensor_hub: SensorHub
+    ) -> None:
+        ctx = CardioTraceContext(
+            raw=b"{}",
+            topic="cardio-trace/t1/d1",
+            tenant_id="t1",
+            serial_number="sn1",
+            brand="garmin",
+        )
+        sensor_hub.redis_client.get = AsyncMock(return_value=None)
+        sensor_hub.backend_api_client.enrich = AsyncMock(
+            return_value=EnrichedDeviceContext(device_uid="dev-uid-1", session_uid=None)
+        )
+
+        with pytest.raises(SessionIdentityNotFoundError):
+            await sensor_hub.backend_identification(ctx)
+
+    async def test_redis_failure_falls_back_to_enrich(
+        self, sensor_hub: SensorHub
+    ) -> None:
+        from redis.exceptions import ConnectionError as RedisConnectionError
+
+        ctx = CardioTraceContext(
+            raw=b"{}",
+            topic="cardio-trace/t1/d1",
+            tenant_id="t1",
+            serial_number="sn1",
+            brand="garmin",
+        )
+        sensor_hub.redis_client.get = AsyncMock(
+            side_effect=RedisConnectionError("down")
+        )
 
         await sensor_hub.backend_identification(ctx)
 
@@ -165,6 +288,19 @@ class TestOnMessage:
     async def test_invalid_payload_swallowed(self, sensor_hub: SensorHub) -> None:
         topic = "cardio-trace/t1/d1"
         await sensor_hub.on_message(topic, b'{"foo": 1}')
+
+        sensor_hub.backend_api_client.enrich.assert_not_called()
+        sensor_hub.backend_api_client.store.assert_not_called()
+
+    async def test_session_not_found_drops_frame(
+        self, sensor_hub: SensorHub, apple_payload: bytes
+    ) -> None:
+        topic = "cardio-trace/t1/d1"
+        sensor_hub.redis_client.get = AsyncMock(
+            side_effect=["dev-from-redis", SESSION_NOT_FOUND_SENTINEL]
+        )
+
+        await sensor_hub.on_message(topic, apple_payload)
 
         sensor_hub.backend_api_client.enrich.assert_not_called()
         sensor_hub.backend_api_client.store.assert_not_called()

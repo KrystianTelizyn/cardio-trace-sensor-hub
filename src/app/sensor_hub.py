@@ -1,6 +1,7 @@
 from app.config import AppSettings
 from app.mqtt_ingress import MqttIngress
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from app.backend_api_client import BackendApiClient
 import logging
 from app.models import CardioTraceContext, CardioTraceRecord
@@ -9,12 +10,14 @@ from app.exceptions import (
     DeviceIdentityNotFoundError,
     PipelineStageError,
     SensorHubException,
+    SessionIdentityNotFoundError,
     TenantIdentificationError,
 )
 import re
 
 logger = logging.getLogger(__name__)
 DEVICE_NOT_FOUND_SENTINEL = "NONE"
+SESSION_NOT_FOUND_SENTINEL = "NONE"
 
 
 class SensorHub:
@@ -54,7 +57,7 @@ class SensorHub:
             self.discover_device_specifics(context)
             await self.backend_identification(context)
             await self.save_record(context)
-        except DeviceIdentityNotFoundError as e:
+        except (DeviceIdentityNotFoundError, SessionIdentityNotFoundError) as e:
             logger.warning(f"Frame dropped on topic {topic}: {e}")
         # Fallback
         except SensorHubException as e:
@@ -83,22 +86,25 @@ class SensorHub:
                 message="Missing tenant_id, serial number, or brand for enrichment",
             )
 
-        device_map_key = (
-            f"device_map:{context.tenant_id}:{context.brand}:{context.serial_number}"
-        )
-        device_uid = await self.redis_client.get(device_map_key)
+        try:
+            device_uid, session_uid = await self._resolve_from_cache(context)
+        except RedisError:
+            logger.warning("Redis unavailable, falling back to backend enrichment")
+            device_uid, session_uid = None, None
+
         if device_uid == DEVICE_NOT_FOUND_SENTINEL:
             raise DeviceIdentityNotFoundError(
                 f"Device not registered: {context.brand}/{context.serial_number}"
             )
+        if session_uid == SESSION_NOT_FOUND_SENTINEL:
+            raise SessionIdentityNotFoundError(
+                f"Session not found for device: {context.brand}/{context.serial_number}"
+            )
 
-        if device_uid is not None:
-            device_session_key = f"device_session:{context.tenant_id}:{device_uid}"
-            session_uid = await self.redis_client.get(device_session_key)
-            if session_uid is not None:
-                context.device_id = device_uid
-                context.session_id = session_uid
-                return
+        if device_uid is not None and session_uid is not None:
+            context.device_id = device_uid
+            context.session_id = session_uid
+            return
 
         enriched = await self.backend_api_client.enrich(
             serial_number=context.serial_number,
@@ -109,8 +115,26 @@ class SensorHub:
             raise DeviceIdentityNotFoundError(
                 f"Device not registered: {context.brand}/{context.serial_number}"
             )
+        if enriched.session_uid is None:
+            raise SessionIdentityNotFoundError(
+                f"Session not found for device: {context.brand}/{context.serial_number}"
+            )
         context.device_id = enriched.device_uid
         context.session_id = enriched.session_uid
+
+    async def _resolve_from_cache(
+        self, context: CardioTraceContext
+    ) -> tuple[str | None, str | None]:
+        device_map_key = (
+            f"device_map:{context.tenant_id}:{context.brand}:{context.serial_number}"
+        )
+        device_uid = await self.redis_client.get(device_map_key)
+        if device_uid is None or device_uid == DEVICE_NOT_FOUND_SENTINEL:
+            return device_uid, None
+
+        device_session_key = f"device_session:{context.tenant_id}:{device_uid}"
+        session_uid = await self.redis_client.get(device_session_key)
+        return device_uid, session_uid
 
     async def save_record(self, context: CardioTraceContext) -> None:
         if (
