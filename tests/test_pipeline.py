@@ -88,7 +88,7 @@ class TestBackendIdentification:
         assert ctx.device_id == "dev-uid-1"
         assert ctx.session_id == "sess-uid-1"
         sensor_hub.backend_api_client.enrich.assert_called_once_with(
-            serial_number="sn1", brand="garmin"
+            serial_number="sn1", brand="garmin", tenant_id="t1"
         )
 
     async def test_missing_prerequisites_raises(self, sensor_hub: SensorHub) -> None:
@@ -110,7 +110,8 @@ class TestSaveRecord:
             session_id="sess-1",
             timestamp=ts,
             hr=72.0,
-            hrv=40.0,
+            sdnn=22.0,
+            rmssd=40.0,
         )
 
         await sensor_hub.save_record(ctx)
@@ -123,7 +124,8 @@ class TestSaveRecord:
         assert record.measurement_session_id == "sess-1"
         assert record.timestamp == ts
         assert record.heart_rate == 72.0
-        assert record.hrv == 40.0
+        assert record.sdnn == 22.0
+        assert record.rmssd == 40.0
 
     async def test_missing_fields_raises(self, sensor_hub: SensorHub) -> None:
         ctx = CardioTraceContext(
@@ -133,7 +135,8 @@ class TestSaveRecord:
             session_id="sess-1",
             timestamp=None,
             hr=72.0,
-            hrv=40.0,
+            sdnn=22.0,
+            rmssd=40.0,
         )
         with pytest.raises(PipelineStageError) as ei:
             await sensor_hub.save_record(ctx)
@@ -155,7 +158,8 @@ class TestOnMessage:
         assert store_call[0][0] == "my-tenant"
         record: CardioTraceRecord = store_call[0][1]
         assert record.heart_rate == 80.0
-        assert record.hrv == 35.5
+        assert record.sdnn == 13.5
+        assert record.rmssd == 35.5
         assert record.measurement_session_id == "sess-uid-1"
 
     async def test_invalid_payload_swallowed(self, sensor_hub: SensorHub) -> None:
@@ -165,7 +169,7 @@ class TestOnMessage:
         sensor_hub.backend_api_client.enrich.assert_not_called()
         sensor_hub.backend_api_client.store.assert_not_called()
 
-    async def test_null_measurements_are_handled_but_not_stored(
+    async def test_null_measurements_are_handled_and_stored(
         self, sensor_hub: SensorHub, garmin_payload: bytes
     ) -> None:
         topic = "cardio-trace/t1/d1"
@@ -178,4 +182,10 @@ class TestOnMessage:
         await sensor_hub.on_message(topic, json.dumps(data).encode())
 
         sensor_hub.backend_api_client.enrich.assert_called_once()
-        sensor_hub.backend_api_client.store.assert_not_called()
+        sensor_hub.backend_api_client.store.assert_called_once()
+        store_call = sensor_hub.backend_api_client.store.call_args
+        assert store_call[0][0] == "t1"
+        record: CardioTraceRecord = store_call[0][1]
+        assert record.heart_rate is None
+        assert record.sdnn is None
+        assert record.rmssd is None

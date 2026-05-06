@@ -6,6 +6,7 @@ import logging
 from app.models import CardioTraceContext, CardioTraceRecord
 from app.parsers import ParsersChain
 from app.exceptions import (
+    DeviceIdentityNotFoundError,
     PipelineStageError,
     SensorHubException,
     TenantIdentificationError,
@@ -13,6 +14,7 @@ from app.exceptions import (
 import re
 
 logger = logging.getLogger(__name__)
+DEVICE_NOT_FOUND_SENTINEL = "NONE"
 
 
 class SensorHub:
@@ -52,6 +54,8 @@ class SensorHub:
             self.discover_device_specifics(context)
             await self.backend_identification(context)
             await self.save_record(context)
+        except DeviceIdentityNotFoundError as e:
+            logger.warning(f"Frame dropped on topic {topic}: {e}")
         # Fallback
         except SensorHubException as e:
             logger.exception(f"Error processing message on topic {topic}: {e}")
@@ -83,6 +87,11 @@ class SensorHub:
             f"device_map:{context.tenant_id}:{context.brand}:{context.serial_number}"
         )
         device_uid = await self.redis_client.get(device_map_key)
+        if device_uid == DEVICE_NOT_FOUND_SENTINEL:
+            raise DeviceIdentityNotFoundError(
+                f"Device not registered: {context.brand}/{context.serial_number}"
+            )
+
         if device_uid is not None:
             device_session_key = f"device_session:{context.tenant_id}:{device_uid}"
             session_uid = await self.redis_client.get(device_session_key)
@@ -92,8 +101,14 @@ class SensorHub:
                 return
 
         enriched = await self.backend_api_client.enrich(
-            serial_number=context.serial_number, brand=context.brand
+            serial_number=context.serial_number,
+            brand=context.brand,
+            tenant_id=context.tenant_id,
         )
+        if enriched.device_uid is None:
+            raise DeviceIdentityNotFoundError(
+                f"Device not registered: {context.brand}/{context.serial_number}"
+            )
         context.device_id = enriched.device_uid
         context.session_id = enriched.session_uid
 
@@ -102,18 +117,17 @@ class SensorHub:
             context.tenant_id is None
             or context.session_id is None
             or context.timestamp is None
-            or context.hr is None
-            or context.hrv is None
         ):
             raise PipelineStageError(
                 stage="save_record",
-                message="Missing one or more required measurement fields",
+                message="Missing one or more required context fields",
             )
 
         record = CardioTraceRecord(
             measurement_session_id=context.session_id,
             timestamp=context.timestamp,
             heart_rate=context.hr,
-            hrv=context.hrv,
+            sdnn=context.sdnn,
+            rmssd=context.rmssd,
         )
         await self.backend_api_client.store(context.tenant_id, record)

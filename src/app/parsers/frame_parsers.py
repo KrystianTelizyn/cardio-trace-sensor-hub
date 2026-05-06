@@ -149,7 +149,6 @@ class AppleParser(BaseFrameParser):
         )
         context.sdnn = hrv_by_type["sdnn"]
         context.rmssd = hrv_by_type["rmssd"]
-        context.hrv = context.rmssd
 
 
 class GarminParser(BaseFrameParser):
@@ -163,7 +162,6 @@ class GarminParser(BaseFrameParser):
         context.hr = self._to_optional_float(payload.data["heart_rate_bpm"])
         context.sdnn = self._to_optional_float(payload.data["sdnn_ms"])
         context.rmssd = self._to_optional_float(payload.data["rmssd_ms"])
-        context.hrv = context.rmssd
 
 
 class EhrParser(BaseFrameParser):
@@ -178,4 +176,3 @@ class EhrParser(BaseFrameParser):
         context.hr = self._to_optional_float(by_code["8867-4"])
         context.sdnn = self._to_optional_float(by_code["X-HRV-SDNN"])
         context.rmssd = self._to_optional_float(by_code["X-HRV-RMSSD"])
-        context.hrv = context.rmssd

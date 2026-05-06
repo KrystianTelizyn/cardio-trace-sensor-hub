@@ -6,8 +6,9 @@ from datetime import datetime
 class CardioTraceRecord(BaseModel):
     measurement_session_id: str
     timestamp: datetime
-    heart_rate: float
-    hrv: float
+    heart_rate: float | None
+    sdnn: float | None
+    rmssd: float | None
 
 
 @dataclass
@@ -23,4 +24,3 @@ class CardioTraceContext:
     hr: float | None = None
     sdnn: float | None = None
     rmssd: float | None = None
-    hrv: float | None = None

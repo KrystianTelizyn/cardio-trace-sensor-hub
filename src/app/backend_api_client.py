@@ -11,7 +11,6 @@ from app.models import CardioTraceRecord
 from app.exceptions import (
     BackendApiError,
     BackendApiValidationError,
-    DeviceIdentityNotFoundError,
 )
 
 logger = logging.getLogger(__name__)
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class EnrichedDeviceContext:
-    device_uid: str
+    device_uid: str | None
     session_uid: str | None
 
 
@@ -33,13 +32,16 @@ class BackendApiClient:
 
     async def send_message(self, message: str) -> None: ...
 
-    async def enrich(self, serial_number: str, brand: str) -> EnrichedDeviceContext:
+    async def enrich(
+        self, serial_number: str, brand: str, tenant_id: str
+    ) -> EnrichedDeviceContext:
+        headers = {"X-Tenant-Id": tenant_id}
         payload = {"serial_number": serial_number, "brand": brand}
-        response = await self._client.post("/ingestion/enrich", json=payload)
+        response = await self._client.post(
+            "/ingestion/enrich", json=payload, headers=headers
+        )
         if response.status_code == 400:
             raise BackendApiValidationError("Invalid enrich payload")
-        if response.status_code == 404:
-            raise DeviceIdentityNotFoundError("Device identity not found")
         if response.status_code >= 500:
             raise BackendApiError(f"Backend API server error: {response.status_code}")
         if response.status_code != 200:
@@ -50,8 +52,10 @@ class BackendApiClient:
         data = self._parse_json(response)
         device_uid = data.get("device_uid")
         session_uid = data.get("session_uid")
-        if not isinstance(device_uid, str):
-            raise BackendApiError("Invalid enrich response: 'device_uid' is missing")
+        if device_uid is not None and not isinstance(device_uid, str):
+            raise BackendApiError(
+                "Invalid enrich response: 'device_uid' must be string or null"
+            )
         if session_uid is not None and not isinstance(session_uid, str):
             raise BackendApiError(
                 "Invalid enrich response: 'session_uid' must be string or null"

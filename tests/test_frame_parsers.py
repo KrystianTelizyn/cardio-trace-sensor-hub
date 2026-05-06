@@ -21,7 +21,6 @@ EXPECTED_SN = "1234567890"
 EXPECTED_HR = 80.0
 EXPECTED_SDNN = 13.5
 EXPECTED_RMSSD = 35.5
-EXPECTED_HRV = 35.5
 
 
 def _assert_common_measurements(ctx: CardioTraceContext) -> None:
@@ -30,7 +29,6 @@ def _assert_common_measurements(ctx: CardioTraceContext) -> None:
     assert ctx.hr == EXPECTED_HR
     assert ctx.sdnn == EXPECTED_SDNN
     assert ctx.rmssd == EXPECTED_RMSSD
-    assert ctx.hrv == EXPECTED_HRV
 
 
 class TestAppleParser:
@@ -70,7 +68,6 @@ class TestAppleParser:
         assert ctx.hr is None
         assert ctx.sdnn is None
         assert ctx.rmssd is None
-        assert ctx.hrv is None
 
 
 class TestGarminParser:
@@ -98,7 +95,6 @@ class TestGarminParser:
         assert ctx.hr is None
         assert ctx.sdnn is None
         assert ctx.rmssd is None
-        assert ctx.hrv is None
 
 
 class TestEhrParser:
@@ -126,7 +122,6 @@ class TestEhrParser:
         assert ctx.hr is None
         assert ctx.sdnn is None
         assert ctx.rmssd is None
-        assert ctx.hrv is None
 
 
 class TestParsersChain:
