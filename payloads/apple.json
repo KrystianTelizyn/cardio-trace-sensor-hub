@@ -1,0 +1,27 @@
+{
+    "deviceInfo": {
+      "deviceId": "1234567890",
+      "manufacturer": "WearableCorp",
+      "model": "WBC HRV Gen2"
+    },
+    "measurement": {
+      "timestamp_iso": "2026-05-05T08:25:24.162404",
+      "sequence_number": 5,
+      "heart_rate": {
+        "value_bpm": 80,
+        "unit": "bpm"
+      },
+      "hrv": [
+        {
+          "type": "sdnn",
+          "value_ms": 13.5,
+          "unit": "ms"
+        },
+        {
+          "type": "rmssd",
+          "value_ms": 35.5,
+          "unit": "ms"
+        }
+      ]
+    }
+  }
