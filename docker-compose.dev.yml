@@ -3,6 +3,11 @@ services:
     image: redis:8.4
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
   redisinsight:
     image: redis/redisinsight:latest
     ports:

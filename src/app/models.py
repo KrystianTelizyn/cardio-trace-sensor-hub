@@ -21,4 +21,6 @@ class CardioTraceContext:
     brand: str | None = None
     timestamp: datetime | None = None
     hr: float | None = None
+    sdnn: float | None = None
+    rmssd: float | None = None
     hrv: float | None = None

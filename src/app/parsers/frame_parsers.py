@@ -61,6 +61,12 @@ class BaseFrameParser:
     def _apply(self, payload: BaseModel, context: CardioTraceContext) -> None:
         raise NotImplementedError
 
+    @staticmethod
+    def _to_optional_float(value: object) -> float | None:
+        if value is None:
+            return None
+        return float(value)
+
 
 # ---------------------------------------------------------------------------
 # Payload models – one flat model per vendor
@@ -78,6 +84,8 @@ class ApplePayload(BaseModel):
         m = self.measurement
         if "timestamp_iso" not in m or "heart_rate" not in m or "hrv" not in m:
             raise ValueError("missing required measurement fields")
+        if not any(e.get("type") == "sdnn" for e in m["hrv"]):
+            raise ValueError("missing sdnn entry in measurement.hrv")
         if not any(e.get("type") == "rmssd" for e in m["hrv"]):
             raise ValueError("missing rmssd entry in measurement.hrv")
         return self
@@ -94,7 +102,7 @@ class GarminPayload(BaseModel):
         for key in ("device_id", "collected_at"):
             if key not in self.header:
                 raise ValueError(f"missing header.{key}")
-        for key in ("heart_rate_bpm", "rmssd_ms"):
+        for key in ("heart_rate_bpm", "sdnn_ms", "rmssd_ms"):
             if key not in self.data:
                 raise ValueError(f"missing data.{key}")
         return self
@@ -112,6 +120,8 @@ class EhrPayload(BaseModel):
         codes = {obs.get("code") for obs in self.observations}
         if "8867-4" not in codes:
             raise ValueError("missing heart-rate observation 8867-4")
+        if "X-HRV-SDNN" not in codes:
+            raise ValueError("missing SDNN observation X-HRV-SDNN")
         if "X-HRV-RMSSD" not in codes:
             raise ValueError("missing RMSSD observation X-HRV-RMSSD")
         return self
@@ -127,15 +137,19 @@ class AppleParser(BaseFrameParser):
     payload_model = ApplePayload
 
     def _apply(self, payload: ApplePayload, context: CardioTraceContext) -> None:
+        hrv_by_type = {
+            entry["type"]: self._to_optional_float(entry.get("value_ms"))
+            for entry in payload.measurement["hrv"]
+        }
         context.serial_number = payload.deviceInfo["deviceId"]
         context.brand = self.brand
         context.timestamp = datetime.fromisoformat(payload.measurement["timestamp_iso"])
-        context.hr = float(payload.measurement["heart_rate"]["value_bpm"])
-        context.hrv = next(
-            float(e["value_ms"])
-            for e in payload.measurement["hrv"]
-            if e["type"] == "rmssd"
+        context.hr = self._to_optional_float(
+            payload.measurement["heart_rate"].get("value_bpm")
         )
+        context.sdnn = hrv_by_type["sdnn"]
+        context.rmssd = hrv_by_type["rmssd"]
+        context.hrv = context.rmssd
 
 
 class GarminParser(BaseFrameParser):
@@ -146,8 +160,10 @@ class GarminParser(BaseFrameParser):
         context.serial_number = payload.header["device_id"]
         context.brand = self.brand
         context.timestamp = datetime.fromisoformat(payload.header["collected_at"])
-        context.hr = float(payload.data["heart_rate_bpm"])
-        context.hrv = float(payload.data["rmssd_ms"])
+        context.hr = self._to_optional_float(payload.data["heart_rate_bpm"])
+        context.sdnn = self._to_optional_float(payload.data["sdnn_ms"])
+        context.rmssd = self._to_optional_float(payload.data["rmssd_ms"])
+        context.hrv = context.rmssd
 
 
 class EhrParser(BaseFrameParser):
@@ -159,5 +175,7 @@ class EhrParser(BaseFrameParser):
         context.serial_number = payload.meta["device_id"]
         context.brand = self.brand
         context.timestamp = datetime.fromisoformat(payload.meta["received_at"])
-        context.hr = float(by_code["8867-4"])
-        context.hrv = float(by_code["X-HRV-RMSSD"])
+        context.hr = self._to_optional_float(by_code["8867-4"])
+        context.sdnn = self._to_optional_float(by_code["X-HRV-SDNN"])
+        context.rmssd = self._to_optional_float(by_code["X-HRV-RMSSD"])
+        context.hrv = context.rmssd

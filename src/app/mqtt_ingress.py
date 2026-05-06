@@ -55,7 +55,9 @@ class MqttIngress:
                 await client.subscribe(self.subscribe_pattern)
                 self.connected = True
                 async for message in client.messages:
-                    await self.ingress_logic.on_message(message.topic, message.payload)
+                    await self.ingress_logic.on_message(
+                        message.topic.value, message.payload
+                    )
         except asyncio.CancelledError:
             raise
         except Exception:
