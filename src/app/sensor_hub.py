@@ -5,7 +5,7 @@ from redis.exceptions import RedisError
 from app.backend_api_client import BackendApiClient
 import logging
 from app.models import CardioTraceContext, CardioTraceRecord
-from app.parsers import ParsersChain
+from app.parsers import parse_frame
 from app.exceptions import (
     DeviceIdentityNotFoundError,
     PipelineStageError,
@@ -31,7 +31,6 @@ class SensorHub:
         )
         self.redis_client = Redis.from_url(settings.redis_url, decode_responses=True)
         self.backend_api_client = BackendApiClient(settings.backend_api_base_url)
-        self.parsers_chain = ParsersChain()
 
     async def __aexit__(self, exc_type, exc_value, traceback) -> None:
         await self.mqtt_ingress.stop()
@@ -69,11 +68,19 @@ class SensorHub:
             context.tenant_id = match.group(1)
         else:
             raise TenantIdentificationError(
-                f"Could not extract tenant_id from topic '{context.topic}' using pattern '{self.settings.mqtt_subscribe_pattern}'"
+                "Could not extract tenant_id from topic "
+                f"'{context.topic}' using pattern "
+                f"'{self.settings.tenant_extraction_regex}'"
             )
 
     def discover_device_specifics(self, context: CardioTraceContext) -> None:
-        self.parsers_chain.parse(context)
+        parsed_frame = parse_frame(context.raw)
+        context.serial_number = parsed_frame.serial_number
+        context.brand = parsed_frame.brand
+        context.timestamp = parsed_frame.timestamp
+        context.heart_rate = parsed_frame.heart_rate
+        context.sdnn = parsed_frame.sdnn
+        context.rmssd = parsed_frame.rmssd
 
     async def backend_identification(self, context: CardioTraceContext) -> None:
         if (
@@ -150,7 +157,7 @@ class SensorHub:
         record = CardioTraceRecord(
             measurement_session_id=context.session_id,
             timestamp=context.timestamp,
-            heart_rate=context.hr,
+            heart_rate=context.heart_rate,
             sdnn=context.sdnn,
             rmssd=context.rmssd,
         )
