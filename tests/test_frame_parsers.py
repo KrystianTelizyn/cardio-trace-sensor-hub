@@ -6,15 +6,11 @@ from datetime import datetime
 import pytest
 
 from app.exceptions import FrameParsingError
-from app.models import CardioTraceContext
-from app.parsers.frame_parsers import (
-    AppleParser,
-    EhrParser,
-    GarminParser,
-    ParsersChain,
-)
-
-from tests.helpers import make_context
+from app.parsers.apple import ApplePayload
+from app.parsers.ehr import EhrPayload
+from app.parsers.frame_parsers import PAYLOAD_MODELS, parse_frame
+from app.parsers.garmin import GarminPayload
+from app.parsers.types import ParsedFrame
 
 EXPECTED_TS = datetime.fromisoformat("2026-05-05T08:25:24.162404")
 EXPECTED_SN = "1234567890"
@@ -23,134 +19,122 @@ EXPECTED_SDNN = 13.5
 EXPECTED_RMSSD = 35.5
 
 
-def _assert_common_measurements(ctx: CardioTraceContext) -> None:
-    assert ctx.serial_number == EXPECTED_SN
-    assert ctx.timestamp == EXPECTED_TS
-    assert ctx.hr == EXPECTED_HR
-    assert ctx.sdnn == EXPECTED_SDNN
-    assert ctx.rmssd == EXPECTED_RMSSD
+def _assert_common_measurements(frame: ParsedFrame, *, brand: str) -> None:
+    assert frame.brand == brand
+    assert frame.serial_number == EXPECTED_SN
+    assert frame.timestamp == EXPECTED_TS
+    assert frame.heart_rate == EXPECTED_HR
+    assert frame.sdnn == EXPECTED_SDNN
+    assert frame.rmssd == EXPECTED_RMSSD
 
 
-class TestAppleParser:
-    def test_parse_happy_path(self, apple_payload: bytes) -> None:
-        ctx = make_context(apple_payload)
-        AppleParser().parse(ctx)
-        assert ctx.brand == "apple"
-        _assert_common_measurements(ctx)
+class TestApplePayload:
+    def test_to_frame_happy_path(self, apple_payload: bytes) -> None:
+        frame = ApplePayload.model_validate_json(apple_payload).to_frame()
+        _assert_common_measurements(frame, brand="apple")
 
-    def test_parsing_applicable_only_apple(
-        self, apple_payload: bytes, garmin_payload: bytes, ehr_payload: bytes
-    ) -> None:
-        p = AppleParser()
-        assert p.parsing_applicable(make_context(apple_payload)) is True
-        assert p.parsing_applicable(make_context(garmin_payload)) is False
-        assert p.parsing_applicable(make_context(ehr_payload)) is False
+    def test_parse_frame_routes_apple(self, apple_payload: bytes) -> None:
+        frame = parse_frame(apple_payload)
+        _assert_common_measurements(frame, brand="apple")
 
     def test_parse_missing_device_id_raises(self, apple_payload: bytes) -> None:
         data = json.loads(apple_payload)
         del data["deviceInfo"]["deviceId"]
         raw = json.dumps(data).encode()
-        ctx = make_context(raw)
         with pytest.raises(FrameParsingError):
-            AppleParser().parse(ctx)
+            parse_frame(raw)
 
-    def test_parsing_applicable_invalid_json(self) -> None:
-        assert AppleParser().parsing_applicable(make_context(b"not json")) is False
-
-    def test_parse_allows_null_hr_sdnn_rmssd(self, apple_payload: bytes) -> None:
+    def test_parse_allows_null_measurements(self, apple_payload: bytes) -> None:
         data = json.loads(apple_payload)
         data["measurement"]["heart_rate"]["value_bpm"] = None
         for entry in data["measurement"]["hrv"]:
             if entry["type"] in ("sdnn", "rmssd"):
                 entry["value_ms"] = None
-        ctx = make_context(json.dumps(data).encode())
-        AppleParser().parse(ctx)
-        assert ctx.hr is None
-        assert ctx.sdnn is None
-        assert ctx.rmssd is None
+        frame = parse_frame(json.dumps(data).encode())
+        assert frame.heart_rate is None
+        assert frame.sdnn is None
+        assert frame.rmssd is None
+
+    def test_extra_fields_are_ignored(self, apple_payload: bytes) -> None:
+        data = json.loads(apple_payload)
+        data["unexpected"] = {"ignored": True}
+        data["deviceInfo"]["firmware"] = {"version": "1.0.0"}
+        data["measurement"]["heart_rate"]["confidence"] = 0.97
+        frame = parse_frame(json.dumps(data).encode())
+        _assert_common_measurements(frame, brand="apple")
 
 
-class TestGarminParser:
-    def test_parse_happy_path(self, garmin_payload: bytes) -> None:
-        ctx = make_context(garmin_payload)
-        GarminParser().parse(ctx)
-        assert ctx.brand == "garmin"
-        _assert_common_measurements(ctx)
+class TestGarminPayload:
+    def test_to_frame_happy_path(self, garmin_payload: bytes) -> None:
+        frame = GarminPayload.model_validate_json(garmin_payload).to_frame()
+        _assert_common_measurements(frame, brand="garmin")
 
-    def test_parsing_applicable_only_garmin(
-        self, apple_payload: bytes, garmin_payload: bytes, ehr_payload: bytes
-    ) -> None:
-        p = GarminParser()
-        assert p.parsing_applicable(make_context(apple_payload)) is False
-        assert p.parsing_applicable(make_context(garmin_payload)) is True
-        assert p.parsing_applicable(make_context(ehr_payload)) is False
+    def test_parse_frame_routes_garmin(self, garmin_payload: bytes) -> None:
+        frame = parse_frame(garmin_payload)
+        _assert_common_measurements(frame, brand="garmin")
 
-    def test_parse_allows_null_hr_sdnn_rmssd(self, garmin_payload: bytes) -> None:
+    def test_parse_allows_null_measurements(self, garmin_payload: bytes) -> None:
         data = json.loads(garmin_payload)
         data["data"]["heart_rate_bpm"] = None
         data["data"]["sdnn_ms"] = None
         data["data"]["rmssd_ms"] = None
-        ctx = make_context(json.dumps(data).encode())
-        GarminParser().parse(ctx)
-        assert ctx.hr is None
-        assert ctx.sdnn is None
-        assert ctx.rmssd is None
+        frame = parse_frame(json.dumps(data).encode())
+        assert frame.heart_rate is None
+        assert frame.sdnn is None
+        assert frame.rmssd is None
+
+    def test_parse_wrong_message_type_raises(self, garmin_payload: bytes) -> None:
+        data = json.loads(garmin_payload)
+        data["header"]["message_type"] = "OTHER"
+        with pytest.raises(FrameParsingError):
+            parse_frame(json.dumps(data).encode())
 
 
-class TestEhrParser:
-    def test_parse_happy_path(self, ehr_payload: bytes) -> None:
-        ctx = make_context(ehr_payload)
-        EhrParser().parse(ctx)
-        assert ctx.brand == "ehr"
-        _assert_common_measurements(ctx)
+class TestEhrPayload:
+    def test_to_frame_happy_path(self, ehr_payload: bytes) -> None:
+        frame = EhrPayload.model_validate_json(ehr_payload).to_frame()
+        _assert_common_measurements(frame, brand="ehr")
 
-    def test_parsing_applicable_only_ehr(
-        self, apple_payload: bytes, garmin_payload: bytes, ehr_payload: bytes
-    ) -> None:
-        p = EhrParser()
-        assert p.parsing_applicable(make_context(apple_payload)) is False
-        assert p.parsing_applicable(make_context(garmin_payload)) is False
-        assert p.parsing_applicable(make_context(ehr_payload)) is True
+    def test_parse_frame_routes_ehr(self, ehr_payload: bytes) -> None:
+        frame = parse_frame(ehr_payload)
+        _assert_common_measurements(frame, brand="ehr")
 
-    def test_parse_allows_null_hr_sdnn_rmssd(self, ehr_payload: bytes) -> None:
+    def test_parse_allows_null_measurements(self, ehr_payload: bytes) -> None:
         data = json.loads(ehr_payload)
         for observation in data["observations"]:
             if observation["code"] in ("8867-4", "X-HRV-SDNN", "X-HRV-RMSSD"):
                 observation["value"] = None
-        ctx = make_context(json.dumps(data).encode())
-        EhrParser().parse(ctx)
-        assert ctx.hr is None
-        assert ctx.sdnn is None
-        assert ctx.rmssd is None
+        frame = parse_frame(json.dumps(data).encode())
+        assert frame.heart_rate is None
+        assert frame.sdnn is None
+        assert frame.rmssd is None
+
+    def test_parse_missing_observation_raises(self, ehr_payload: bytes) -> None:
+        data = json.loads(ehr_payload)
+        data["observations"] = [
+            observation
+            for observation in data["observations"]
+            if observation["code"] != "X-HRV-SDNN"
+        ]
+        with pytest.raises(FrameParsingError):
+            parse_frame(json.dumps(data).encode())
 
 
-class TestParsersChain:
-    def test_routes_apple(self, apple_payload: bytes) -> None:
-        ctx = make_context(apple_payload)
-        ParsersChain().parse(ctx)
-        assert ctx.brand == "apple"
-        _assert_common_measurements(ctx)
-
-    def test_routes_garmin(self, garmin_payload: bytes) -> None:
-        ctx = make_context(garmin_payload)
-        ParsersChain().parse(ctx)
-        assert ctx.brand == "garmin"
-        _assert_common_measurements(ctx)
-
-    def test_routes_ehr(self, ehr_payload: bytes) -> None:
-        ctx = make_context(ehr_payload)
-        ParsersChain().parse(ctx)
-        assert ctx.brand == "ehr"
-        _assert_common_measurements(ctx)
-
+class TestParseFrame:
     def test_no_parser_found(self) -> None:
-        ctx = make_context(b'{"foo": 1}')
         with pytest.raises(FrameParsingError, match="No parser found"):
-            ParsersChain().parse(ctx)
+            parse_frame(b'{"foo": 1}')
 
-    def test_multiple_parsers_raises(self, apple_payload: bytes) -> None:
-        chain = ParsersChain()
-        chain.add_parser(AppleParser())
-        ctx = make_context(apple_payload)
-        with pytest.raises(FrameParsingError, match="Multiple parsers found"):
-            chain.parse(ctx)
+    def test_invalid_json_raises(self) -> None:
+        with pytest.raises(FrameParsingError, match="No parser found"):
+            parse_frame(b"not json")
+
+    def test_multiple_parsers_matched_raises(
+        self, monkeypatch: pytest.MonkeyPatch, apple_payload: bytes
+    ) -> None:
+        monkeypatch.setattr(
+            "app.parsers.frame_parsers.PAYLOAD_MODELS",
+            [*PAYLOAD_MODELS, ApplePayload],
+        )
+        with pytest.raises(FrameParsingError, match="Multiple parsers matched"):
+            parse_frame(apple_payload)
