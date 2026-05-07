@@ -7,7 +7,6 @@ from app.exceptions import TenantIdentificationError
 from app.models import CardioTraceContext
 from app.pipeline_steps.base import PipelineStep
 from app.pipeline_steps.base import handles_pipeline_error
-from app.metrics import PIPELINE_MESSAGES_DROPPED_TOTAL
 from logging import getLogger
 
 logger = getLogger(__name__)
@@ -28,11 +27,10 @@ class TenantIdentificationStep(PipelineStep):
             f"'{self._settings.tenant_extraction_regex}'"
         )
 
-    @handles_pipeline_error(TenantIdentificationError)
+    @handles_pipeline_error(
+        TenantIdentificationError, reason="tenant_identification_error"
+    )
     async def on_tenant_identification_error(
         self, context: CardioTraceContext, exc: TenantIdentificationError
     ) -> None:
         logger.warning("Error identifying tenant: %s", exc)
-        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(
-            reason="tenant_identification_error"
-        ).inc()

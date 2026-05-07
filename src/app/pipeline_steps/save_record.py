@@ -6,7 +6,6 @@ from app.metrics import BACKEND_STORE_REQUESTS_TOTAL, status_class_from_code
 from app.models import CardioTraceContext, CardioTraceRecord
 from app.pipeline_steps.base import PipelineStep
 from app.pipeline_steps.base import handles_pipeline_error
-from app.metrics import PIPELINE_MESSAGES_DROPPED_TOTAL
 from logging import getLogger
 
 logger = getLogger(__name__)
@@ -39,7 +38,7 @@ class SaveRecordStep(PipelineStep):
 
         BACKEND_STORE_REQUESTS_TOTAL.labels(result="success", status_class="2xx").inc()
 
-    @handles_pipeline_error(BackendApiError)
+    @handles_pipeline_error(BackendApiError, reason="backend_api_error")
     async def on_backend_api_error(
         self, context: CardioTraceContext, exc: BackendApiError
     ) -> None:
@@ -48,11 +47,9 @@ class SaveRecordStep(PipelineStep):
             result="error",
             status_class=status_class_from_code(exc.status_code),
         ).inc()
-        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(reason="backend_api_error").inc()
 
-    @handles_pipeline_error(PipelineStageError)
+    @handles_pipeline_error(PipelineStageError, reason="pipeline_stage_error")
     async def on_pipeline_stage_error(
         self, context: CardioTraceContext, exc: PipelineStageError
     ) -> None:
         logger.warning("Pipeline stage error: %s", exc)
-        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(reason="pipeline_stage_error").inc()

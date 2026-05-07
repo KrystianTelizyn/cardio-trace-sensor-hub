@@ -16,7 +16,6 @@ from app.metrics import (
     BACKEND_ENRICH_REQUESTS_TOTAL,
     REDIS_CACHE_HITS_TOTAL,
     REDIS_CACHE_LOOKUPS_TOTAL,
-    PIPELINE_MESSAGES_DROPPED_TOTAL,
     status_class_from_code,
 )
 from app.models import CardioTraceContext
@@ -92,7 +91,7 @@ class BackendIdentificationStep(PipelineStep):
                 result="success", status_class="2xx"
             ).inc()
 
-    @handles_pipeline_error(BackendApiError)
+    @handles_pipeline_error(BackendApiError, reason="backend_api_error")
     async def on_backend_api_error(
         self, context: CardioTraceContext, exc: BackendApiError
     ) -> None:
@@ -101,32 +100,28 @@ class BackendIdentificationStep(PipelineStep):
             result="error",
             status_class=status_class_from_code(exc.status_code),
         ).inc()
-        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(reason="backend_api_error").inc()
 
-    @handles_pipeline_error(DeviceIdentityNotFoundError)
+    @handles_pipeline_error(
+        DeviceIdentityNotFoundError, reason="device_identity_not_found_error"
+    )
     async def on_device_identity_not_found_error(
         self, context: CardioTraceContext, exc: DeviceIdentityNotFoundError
     ) -> None:
         logger.warning("Device identity not found: %s", exc)
-        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(
-            reason="device_identity_not_found_error"
-        ).inc()
 
-    @handles_pipeline_error(SessionIdentityNotFoundError)
+    @handles_pipeline_error(
+        SessionIdentityNotFoundError, reason="session_identity_not_found_error"
+    )
     async def on_session_identity_not_found_error(
         self, context: CardioTraceContext, exc: SessionIdentityNotFoundError
     ) -> None:
         logger.warning("Session identity not found: %s", exc)
-        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(
-            reason="session_identity_not_found_error"
-        ).inc()
 
-    @handles_pipeline_error(PipelineStageError)
+    @handles_pipeline_error(PipelineStageError, reason="pipeline_stage_error")
     async def on_pipeline_stage_error(
         self, context: CardioTraceContext, exc: PipelineStageError
     ) -> None:
         logger.warning("Pipeline stage error: %s", exc)
-        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(reason="pipeline_stage_error").inc()
 
     async def _resolve_from_cache(
         self, context: CardioTraceContext

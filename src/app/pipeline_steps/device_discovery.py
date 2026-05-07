@@ -5,10 +5,6 @@ from app.parsers import parse_frame
 from app.pipeline_steps.base import PipelineStep
 from app.pipeline_steps.base import handles_pipeline_error
 from app.exceptions import FrameParsingError
-from logging import getLogger
-from app.metrics import PIPELINE_MESSAGES_DROPPED_TOTAL
-
-logger = getLogger(__name__)
 
 
 class DeviceDiscoveryStep(PipelineStep):
@@ -21,8 +17,8 @@ class DeviceDiscoveryStep(PipelineStep):
         context.sdnn = parsed_frame.sdnn
         context.rmssd = parsed_frame.rmssd
 
-    @handles_pipeline_error(FrameParsingError)
+    @handles_pipeline_error(FrameParsingError, reason="frame_parsing_error")
     async def on_frame_parsing_error(
         self, context: CardioTraceContext, exc: FrameParsingError
     ) -> None:
-        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(reason="frame_parsing_error").inc()
+        return None
