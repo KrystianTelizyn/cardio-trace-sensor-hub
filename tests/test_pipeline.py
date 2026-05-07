@@ -232,7 +232,7 @@ class TestSaveRecord:
             tenant_id="t1",
             session_id="sess-1",
             timestamp=ts,
-            hr=72.0,
+            heart_rate=72.0,
             sdnn=22.0,
             rmssd=40.0,
         )
@@ -257,7 +257,7 @@ class TestSaveRecord:
             tenant_id="t1",
             session_id="sess-1",
             timestamp=None,
-            hr=72.0,
+            heart_rate=72.0,
             sdnn=22.0,
             rmssd=40.0,
         )
