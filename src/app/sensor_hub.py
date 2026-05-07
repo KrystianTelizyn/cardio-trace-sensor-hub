@@ -57,10 +57,12 @@ class SensorHub:
             await self.backend_identification(context)
             await self.save_record(context)
         except (DeviceIdentityNotFoundError, SessionIdentityNotFoundError) as e:
-            logger.warning(f"Frame dropped on topic {topic}: {e}")
+            logger.warning("Frame dropped on topic %s: %s", topic, e)
         # Fallback
         except SensorHubException as e:
-            logger.exception(f"Error processing message on topic {topic}: {e}")
+            logger.exception("Error processing message on topic %s: %s", topic, e)
+        except Exception:
+            logger.exception("Unexpected error processing message on topic %s", topic)
 
     def identify_tenant(self, context: CardioTraceContext) -> None:
         match = re.match(self.settings.tenant_extraction_regex, context.topic)
