@@ -4,12 +4,15 @@ from app.backend_api_client import BackendApiClient
 from app.exceptions import BackendApiError, PipelineStageError
 from app.metrics import BACKEND_STORE_REQUESTS_TOTAL, status_class_from_code
 from app.models import CardioTraceContext, CardioTraceRecord
-from app.pipeline_steps.base import PipelineStep, SAVE_RECORD_STEP
+from app.pipeline_steps.base import PipelineStep
+from app.pipeline_steps.base import handles_pipeline_error
+from app.metrics import PIPELINE_MESSAGES_DROPPED_TOTAL
+from logging import getLogger
+
+logger = getLogger(__name__)
 
 
 class SaveRecordStep(PipelineStep):
-    name = SAVE_RECORD_STEP
-
     def __init__(self, backend_api_client: BackendApiClient) -> None:
         self._backend_api_client = backend_api_client
 
@@ -20,7 +23,7 @@ class SaveRecordStep(PipelineStep):
             or context.timestamp is None
         ):
             raise PipelineStageError(
-                stage=SAVE_RECORD_STEP,
+                stage=self.__class__.__name__,
                 message="Missing one or more required context fields",
             )
 
@@ -36,9 +39,20 @@ class SaveRecordStep(PipelineStep):
 
         BACKEND_STORE_REQUESTS_TOTAL.labels(result="success", status_class="2xx").inc()
 
-    async def on_error(self, context: CardioTraceContext, exc: Exception) -> None:
-        if isinstance(exc, BackendApiError):
-            BACKEND_STORE_REQUESTS_TOTAL.labels(
-                result="error",
-                status_class=status_class_from_code(exc.status_code),
-            ).inc()
+    @handles_pipeline_error(BackendApiError)
+    async def on_backend_api_error(
+        self, context: CardioTraceContext, exc: BackendApiError
+    ) -> None:
+        logger.warning("Backend API error: %s", exc)
+        BACKEND_STORE_REQUESTS_TOTAL.labels(
+            result="error",
+            status_class=status_class_from_code(exc.status_code),
+        ).inc()
+        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(reason="backend_api_error").inc()
+
+    @handles_pipeline_error(PipelineStageError)
+    async def on_pipeline_stage_error(
+        self, context: CardioTraceContext, exc: PipelineStageError
+    ) -> None:
+        logger.warning("Pipeline stage error: %s", exc)
+        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(reason="pipeline_stage_error").inc()

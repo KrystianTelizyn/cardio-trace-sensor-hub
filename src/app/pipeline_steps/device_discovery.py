@@ -2,12 +2,16 @@ from __future__ import annotations
 
 from app.models import CardioTraceContext
 from app.parsers import parse_frame
-from app.pipeline_steps.base import DEVICE_DISCOVERY_STEP, PipelineStep
+from app.pipeline_steps.base import PipelineStep
+from app.pipeline_steps.base import handles_pipeline_error
+from app.exceptions import FrameParsingError
+from logging import getLogger
+from app.metrics import PIPELINE_MESSAGES_DROPPED_TOTAL
+
+logger = getLogger(__name__)
 
 
 class DeviceDiscoveryStep(PipelineStep):
-    name = DEVICE_DISCOVERY_STEP
-
     async def run(self, context: CardioTraceContext) -> None:
         parsed_frame = parse_frame(context.raw)
         context.serial_number = parsed_frame.serial_number
@@ -16,3 +20,9 @@ class DeviceDiscoveryStep(PipelineStep):
         context.heart_rate = parsed_frame.heart_rate
         context.sdnn = parsed_frame.sdnn
         context.rmssd = parsed_frame.rmssd
+
+    @handles_pipeline_error(FrameParsingError)
+    async def on_frame_parsing_error(
+        self, context: CardioTraceContext, exc: FrameParsingError
+    ) -> None:
+        PIPELINE_MESSAGES_DROPPED_TOTAL.labels(reason="frame_parsing_error").inc()
