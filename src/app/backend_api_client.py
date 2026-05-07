@@ -30,20 +30,32 @@ class BackendApiClient:
     async def shutdown(self) -> None:
         await self._client.aclose()
 
-    async def send_message(self, message: str) -> None: ...
+    async def send_message(
+        self,
+        path: str,
+        *,
+        tenant_id: str,
+        payload: Mapping[str, Any],
+    ) -> httpx.Response:
+        headers = {"X-Tenant-Id": tenant_id}
+        try:
+            response = await self._client.post(path, json=payload, headers=headers)
+        except httpx.HTTPError as exc:
+            raise BackendApiError(f"Backend API request failed: {exc}") from exc
+        if response.status_code >= 500:
+            raise BackendApiError(f"Backend API server error: {response.status_code}")
+        return response
 
     async def enrich(
         self, serial_number: str, brand: str, tenant_id: str
     ) -> EnrichedDeviceContext:
-        headers = {"X-Tenant-Id": tenant_id}
-        payload = {"serial_number": serial_number, "brand": brand}
-        response = await self._client.post(
-            "/ingestion/enrich", json=payload, headers=headers
+        response = await self.send_message(
+            "/ingestion/enrich",
+            tenant_id=tenant_id,
+            payload={"serial_number": serial_number, "brand": brand},
         )
         if response.status_code == 400:
             raise BackendApiValidationError("Invalid enrich payload")
-        if response.status_code >= 500:
-            raise BackendApiError(f"Backend API server error: {response.status_code}")
         if response.status_code != 200:
             raise BackendApiError(
                 f"Unexpected enrich response status: {response.status_code}"
@@ -64,9 +76,10 @@ class BackendApiClient:
         return EnrichedDeviceContext(device_uid=device_uid, session_uid=session_uid)
 
     async def store(self, tenant_id: str, record: CardioTraceRecord) -> None:
-        headers = {"X-Tenant-Id": tenant_id}
-        response = await self._client.post(
-            "/measurements", json=record.model_dump(mode="json"), headers=headers
+        response = await self.send_message(
+            "/measurements",
+            tenant_id=tenant_id,
+            payload=record.model_dump(mode="json"),
         )
 
         if response.status_code == 201:
@@ -82,8 +95,6 @@ class BackendApiClient:
             raise BackendApiValidationError("Invalid measurements payload")
         if response.status_code == 404:
             raise BackendApiError("Measurement session not found")
-        if response.status_code >= 500:
-            raise BackendApiError(f"Backend API server error: {response.status_code}")
         raise BackendApiError(
             f"Unexpected measurements response status: {response.status_code}"
         )
