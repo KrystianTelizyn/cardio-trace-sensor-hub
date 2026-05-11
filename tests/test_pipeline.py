@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from typing import TypeVar
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -14,13 +15,27 @@ from app.exceptions import (
     TenantIdentificationError,
 )
 from app.models import CardioTraceContext, CardioTraceRecord
-from app.pipeline import (
+from app.pipeline import MessagePipeline
+from app.pipeline_steps import (
+    BackendIdentificationStep,
+    SaveRecordStep,
+    TenantIdentificationStep,
+)
+from app.pipeline_steps.backend_identification import (
     DEVICE_NOT_FOUND_SENTINEL,
     SESSION_NOT_FOUND_SENTINEL,
-    MessagePipeline,
 )
 
 from tests.helpers import fake_settings, make_context
+
+S = TypeVar("S")
+
+
+def _step(pipeline: MessagePipeline, step_type: type[S]) -> S:
+    for s in pipeline.steps:
+        if isinstance(s, step_type):
+            return s
+    raise AssertionError(f"No {step_type.__name__} in pipeline.steps")
 
 
 @pytest.fixture
@@ -42,15 +57,17 @@ def pipeline() -> MessagePipeline:
 
 
 class TestIdentifyTenant:
-    def test_extracts_tenant_id(self, pipeline: MessagePipeline) -> None:
+    async def test_extracts_tenant_id(self, pipeline: MessagePipeline) -> None:
         ctx = make_context(b"{}", topic="cardio-trace/tenant-abc/device-1")
-        pipeline.identify_tenant(ctx)
+        step = _step(pipeline, TenantIdentificationStep)
+        await step.run(ctx)
         assert ctx.tenant_id == "tenant-abc"
 
-    def test_bad_topic_raises(self, pipeline: MessagePipeline) -> None:
+    async def test_bad_topic_raises(self, pipeline: MessagePipeline) -> None:
         ctx = make_context(b"{}", topic="bad-topic")
+        step = _step(pipeline, TenantIdentificationStep)
         with pytest.raises(TenantIdentificationError):
-            pipeline.identify_tenant(ctx)
+            await step.run(ctx)
 
 
 class TestBackendIdentification:
@@ -68,7 +85,9 @@ class TestBackendIdentification:
             side_effect=["dev-from-redis", "sess-from-redis"]
         )
 
-        await pipeline.backend_identification(ctx)
+        step = _step(pipeline, BackendIdentificationStep)
+        await step.pre(ctx)
+        await step.run(ctx)
 
         assert ctx.device_id == "dev-from-redis"
         assert ctx.session_id == "sess-from-redis"
@@ -85,7 +104,9 @@ class TestBackendIdentification:
         )
         pipeline.redis_client.get = AsyncMock(return_value=None)
 
-        await pipeline.backend_identification(ctx)
+        step = _step(pipeline, BackendIdentificationStep)
+        await step.pre(ctx)
+        await step.run(ctx)
 
         assert ctx.device_id == "dev-uid-1"
         assert ctx.session_id == "sess-uid-1"
@@ -103,8 +124,10 @@ class TestBackendIdentification:
         )
         pipeline.redis_client.get = AsyncMock(return_value=DEVICE_NOT_FOUND_SENTINEL)
 
+        step = _step(pipeline, BackendIdentificationStep)
         with pytest.raises(DeviceIdentityNotFoundError):
-            await pipeline.backend_identification(ctx)
+            await step.pre(ctx)
+            await step.run(ctx)
 
         pipeline.backend_api_client.enrich.assert_not_called()
 
@@ -120,8 +143,10 @@ class TestBackendIdentification:
             side_effect=["dev-from-redis", SESSION_NOT_FOUND_SENTINEL]
         )
 
+        step = _step(pipeline, BackendIdentificationStep)
         with pytest.raises(SessionIdentityNotFoundError):
-            await pipeline.backend_identification(ctx)
+            await step.pre(ctx)
+            await step.run(ctx)
 
         pipeline.backend_api_client.enrich.assert_not_called()
 
@@ -137,7 +162,9 @@ class TestBackendIdentification:
         )
         pipeline.redis_client.get = AsyncMock(side_effect=["dev-from-redis", None])
 
-        await pipeline.backend_identification(ctx)
+        step = _step(pipeline, BackendIdentificationStep)
+        await step.pre(ctx)
+        await step.run(ctx)
 
         assert ctx.device_id == "dev-uid-1"
         assert ctx.session_id == "sess-uid-1"
@@ -162,8 +189,10 @@ class TestBackendIdentification:
             )
         )
 
+        step = _step(pipeline, BackendIdentificationStep)
         with pytest.raises(DeviceIdentityNotFoundError):
-            await pipeline.backend_identification(ctx)
+            await step.pre(ctx)
+            await step.run(ctx)
 
     async def test_enrich_returns_null_session_raises(
         self, pipeline: MessagePipeline
@@ -180,8 +209,10 @@ class TestBackendIdentification:
             return_value=EnrichedDeviceContext(device_uid="dev-uid-1", session_uid=None)
         )
 
+        step = _step(pipeline, BackendIdentificationStep)
         with pytest.raises(SessionIdentityNotFoundError):
-            await pipeline.backend_identification(ctx)
+            await step.pre(ctx)
+            await step.run(ctx)
 
     async def test_redis_failure_falls_back_to_enrich(
         self, pipeline: MessagePipeline
@@ -197,7 +228,9 @@ class TestBackendIdentification:
         )
         pipeline.redis_client.get = AsyncMock(side_effect=RedisConnectionError("down"))
 
-        await pipeline.backend_identification(ctx)
+        step = _step(pipeline, BackendIdentificationStep)
+        await step.pre(ctx)
+        await step.run(ctx)
 
         assert ctx.device_id == "dev-uid-1"
         assert ctx.session_id == "sess-uid-1"
@@ -211,9 +244,11 @@ class TestBackendIdentification:
         ctx = CardioTraceContext(
             raw=b"{}", topic="x", tenant_id=None, serial_number="s", brand="apple"
         )
+        step = _step(pipeline, BackendIdentificationStep)
         with pytest.raises(PipelineStageError) as ei:
-            await pipeline.backend_identification(ctx)
-        assert ei.value.stage == "backend_identification"
+            await step.pre(ctx)
+            await step.run(ctx)
+        assert ei.value.stage == "BackendIdentificationStep"
 
 
 class TestSaveRecord:
@@ -230,7 +265,9 @@ class TestSaveRecord:
             rmssd=40.0,
         )
 
-        await pipeline.save_record(ctx)
+        step = _step(pipeline, SaveRecordStep)
+        await step.pre(ctx)
+        await step.run(ctx)
 
         pipeline.backend_api_client.store.assert_called_once()
         call_args = pipeline.backend_api_client.store.call_args
@@ -254,9 +291,11 @@ class TestSaveRecord:
             sdnn=22.0,
             rmssd=40.0,
         )
+        step = _step(pipeline, SaveRecordStep)
         with pytest.raises(PipelineStageError) as ei:
-            await pipeline.save_record(ctx)
-        assert ei.value.stage == "save_record"
+            await step.pre(ctx)
+            await step.run(ctx)
+        assert ei.value.stage == "SaveRecordStep"
 
 
 class TestOnMessage:
