@@ -12,6 +12,7 @@ dependencies = [
     "aiomqtt>=2.5.1",
     "fastapi[standard]>=0.135.2",
     "httpx>=0.28.1",
+    "prometheus-client>=0.23.1",
     "python-dotenv>=1.0.0",
     "redis>=5.0.0",
 ]

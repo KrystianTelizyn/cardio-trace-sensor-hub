@@ -29,11 +29,14 @@ class TenantIdentificationError(SensorHubException):
 
 
 class BackendApiError(SensorHubException):
-    pass
+    def __init__(self, message: str, *, status_code: int | None = None):
+        self.status_code = status_code
+        super().__init__(message)
 
 
 class BackendApiValidationError(BackendApiError):
-    pass
+    def __init__(self, message: str, *, status_code: int | None = None):
+        super().__init__(message, status_code=status_code)
 
 
 class DeviceIdentityNotFoundError(SensorHubException):

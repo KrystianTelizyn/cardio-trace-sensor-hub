@@ -6,6 +6,8 @@ from typing import Protocol
 
 from aiomqtt import Client
 
+from app.metrics import MQTT_CONNECTED, MQTT_RECONNECTS_TOTAL
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +43,7 @@ class MqttIngress:
     async def stop(self) -> None:
         if self.task is None or self.task.done():
             self.task = None
+            MQTT_CONNECTED.set(0)
             return
         self.task.cancel()
         try:
@@ -49,6 +52,7 @@ class MqttIngress:
             pass
         self.task = None
         self.connected = False
+        MQTT_CONNECTED.set(0)
 
     async def consume_loop(self) -> None:
         backoff_seconds = self.initial_backoff
@@ -60,6 +64,7 @@ class MqttIngress:
                 ) as client:
                     await client.subscribe(self.subscribe_pattern)
                     self.connected = True
+                    MQTT_CONNECTED.set(1)
                     backoff_seconds = self.initial_backoff
                     async for message in client.messages:
                         await self.ingress_logic.on_message(
@@ -72,7 +77,9 @@ class MqttIngress:
                     "MQTT ingress connection lost, reconnecting in %.2f seconds",
                     backoff_seconds,
                 )
+                MQTT_RECONNECTS_TOTAL.inc()
                 await asyncio.sleep(backoff_seconds)
                 backoff_seconds = min(backoff_seconds * 2, self.max_backoff)
             finally:
                 self.connected = False
+                MQTT_CONNECTED.set(0)

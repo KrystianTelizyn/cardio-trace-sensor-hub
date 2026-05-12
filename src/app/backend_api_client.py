@@ -43,7 +43,10 @@ class BackendApiClient:
         except httpx.HTTPError as exc:
             raise BackendApiError(f"Backend API request failed: {exc}") from exc
         if response.status_code >= 500:
-            raise BackendApiError(f"Backend API server error: {response.status_code}")
+            raise BackendApiError(
+                f"Backend API server error: {response.status_code}",
+                status_code=response.status_code,
+            )
         return response
 
     async def enrich(
@@ -55,10 +58,14 @@ class BackendApiClient:
             payload={"serial_number": serial_number, "brand": brand},
         )
         if response.status_code == 400:
-            raise BackendApiValidationError("Invalid enrich payload")
+            raise BackendApiValidationError(
+                "Invalid enrich payload",
+                status_code=response.status_code,
+            )
         if response.status_code != 200:
             raise BackendApiError(
-                f"Unexpected enrich response status: {response.status_code}"
+                f"Unexpected enrich response status: {response.status_code}",
+                status_code=response.status_code,
             )
 
         data = self._parse_json(response)
@@ -66,13 +73,14 @@ class BackendApiClient:
         session_uid = data.get("session_uid")
         if device_uid is not None and not isinstance(device_uid, str):
             raise BackendApiError(
-                "Invalid enrich response: 'device_uid' must be string or null"
+                "Invalid enrich response: 'device_uid' must be string or null",
+                status_code=response.status_code,
             )
         if session_uid is not None and not isinstance(session_uid, str):
             raise BackendApiError(
-                "Invalid enrich response: 'session_uid' must be string or null"
+                "Invalid enrich response: 'session_uid' must be string or null",
+                status_code=response.status_code,
             )
-
         return EnrichedDeviceContext(device_uid=device_uid, session_uid=session_uid)
 
     async def store(self, tenant_id: str, record: CardioTraceRecord) -> None:
@@ -92,11 +100,18 @@ class BackendApiClient:
             )
             return
         if response.status_code == 400:
-            raise BackendApiValidationError("Invalid measurements payload")
+            raise BackendApiValidationError(
+                "Invalid measurements payload",
+                status_code=response.status_code,
+            )
         if response.status_code == 404:
-            raise BackendApiError("Measurement session not found")
+            raise BackendApiError(
+                "Measurement session not found",
+                status_code=response.status_code,
+            )
         raise BackendApiError(
-            f"Unexpected measurements response status: {response.status_code}"
+            f"Unexpected measurements response status: {response.status_code}",
+            status_code=response.status_code,
         )
 
     async def is_ready(self) -> bool:
@@ -110,7 +125,13 @@ class BackendApiClient:
         try:
             payload = response.json()
         except ValueError as exc:
-            raise BackendApiError("Backend API returned invalid JSON") from exc
+            raise BackendApiError(
+                "Backend API returned invalid JSON",
+                status_code=response.status_code,
+            ) from exc
         if not isinstance(payload, dict):
-            raise BackendApiError("Backend API returned unexpected response shape")
+            raise BackendApiError(
+                "Backend API returned unexpected response shape",
+                status_code=response.status_code,
+            )
         return payload
